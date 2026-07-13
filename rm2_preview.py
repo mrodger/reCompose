@@ -1,256 +1,204 @@
 #!/usr/bin/env python3
-"""rm2_preview.py — Browser-based preview for the reCompose mockup pipeline.
+"""rm2_preview.py - Live reMarkable 2 preview for reCompose pipeline output.
 
-Serves on http://localhost:7700
+Serves http://localhost:7700
+
+Auto-watches the pipeline output directory (default
+~/vault/dev/projects/rm2-pipeline/) and shows the latest built PDF, page by
+page, rendered inside a clean CSS reMarkable 2 device frame (real bezel,
+rounded corners, e-ink grayscale). No upload UI - it just shows whatever was
+most recently built.
+
+WHY A CSS FRAME INSTEAD OF THE DEVICE PHOTO?
+  The CC-licensed RM2 photo on Wikimedia is a "screen-on" flat-lay where the
+  display is a transparent window onto the grey surface behind the tablet.
+  Pasting a report page into that photo leaves a grey ring (the surface
+  showing through) and the corners never line up. A drawn frame gives
+  pixel-accurate alignment and a properly visible bezel. For shareable stills
+  composited into the real device photo, use rm2_mockup.py.
 
 Usage:
-  python3 rm2_preview.py [--port 7700] [--dir /path/to/pdfs]
-
-Drop PDFs into the working directory (default: same dir as this script),
-then open http://localhost:7700 to browse pages as RM2 mockups.
+  python3 rm2_preview.py [--port 7700] [--dir /path/to/pdf/output]
 """
 
 import argparse
 import io
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-import numpy as np
-import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, Response
-from PIL import Image, ImageDraw
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import HTMLResponse
+from PIL import Image
 
-# ── mockup logic (inlined from rm2_mockup.py) ────────────────────────────────
+DEFAULT_DIR = Path.home() / "vault" / "dev" / "projects" / "rm2-pipeline"
 
-HERE         = Path(__file__).resolve().parent
-DEVICE_IMAGE = HERE / "rm2_device.jpg"
+app = FastAPI()
 
-# Screen corners measured by Sobel edge detection on the 1860×2556 device photo.
-# Top is 15px wider than bottom (camera keystone) — perspective warp corrects it.
-SCREEN_CORNERS = {
-    "TL": (183, 257),
-    "TR": (1775, 253),
-    "BL": (194, 2475),
-    "BR": (1771, 2470),
-}
+# Live state, refreshed on each /api/state call.
+state = {"path": None, "mtime": 0.0, "pages": 0, "name": "(no PDF found)"}
 
-_device_cache: Image.Image | None = None
-
-def _device() -> Image.Image:
-    global _device_cache
-    if _device_cache is None:
-        _device_cache = Image.open(DEVICE_IMAGE).convert("RGB")
-    return _device_cache
+# The RM2 canvas is 157.8 x 210.4 mm -> aspect 210.4/157.8 = 1.3333.
+# Screen is drawn at 360 x 480 px to match that ratio exactly (no distortion).
+SCREEN_W, SCREEN_H = 360, 480
 
 
-def _perspective_coeffs(src_pts, dst_pts):
-    A, b = [], []
-    for (xs, ys), (xd, yd) in zip(src_pts, dst_pts):
-        A.append([xd, yd, 1, 0,  0,  0, -xs*xd, -xs*yd])
-        A.append([0,  0,  0, xd, yd, 1, -ys*xd, -ys*yd])
-        b.extend([xs, ys])
-    coeffs, _, _, _ = np.linalg.lstsq(np.array(A), np.array(b), rcond=None)
-    return tuple(float(c) for c in coeffs)
+def _find_latest(watch_dir: Path) -> Path | None:
+    pdfs = list(watch_dir.glob("*.pdf"))
+    if not pdfs:
+        return None
+    return max(pdfs, key=lambda f: f.stat().st_mtime)
 
 
-def _pdf_page(pdf_bytes: bytes, page: int, dpi: int = 226) -> Image.Image:
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "input.pdf"
-        src.write_bytes(pdf_bytes)
-        subprocess.run(
-            ["pdftoppm", "-r", str(dpi), "-png",
-             "-f", str(page), "-l", str(page),
-             str(src), f"{tmp}/p"],
-            check=True, capture_output=True,
-        )
-        pages = sorted(Path(tmp).glob("*.png"))
-        if not pages:
-            raise RuntimeError(f"pdftoppm: no output for page {page}")
-        return Image.open(pages[0]).copy()
+def _refresh(watch_dir: Path) -> None:
+    p = _find_latest(watch_dir)
+    if p is None:
+        state.update(path=None, mtime=0.0, pages=0, name="(no PDF found)")
+        return
+    mtime = p.stat().st_mtime
+    if state["path"] != str(p) or state["mtime"] != mtime:
+        state.update(path=str(p), mtime=mtime,
+                     pages=_page_count(p), name=p.name)
 
 
-def _page_count(pdf_bytes: bytes) -> int:
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-        f.write(pdf_bytes)
-        fname = f.name
-    out = subprocess.run(["pdfinfo", fname], capture_output=True, text=True)
-    Path(fname).unlink(missing_ok=True)
+def _page_count(pdf: Path) -> int:
+    out = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, text=True)
     for line in out.stdout.splitlines():
         if line.startswith("Pages:"):
             return int(line.split()[-1])
     return 1
 
 
-def _composite(page_img: Image.Image, grayscale: bool = True) -> bytes:
-    if grayscale:
-        page_img = page_img.convert("L").convert("RGB")
+def _render_page(pdf: Path, page: int, dpi: int = 226) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.pdf"
+        src.write_bytes(pdf.read_bytes())
+        subprocess.run(
+            ["pdftoppm", "-r", str(dpi), "-png",
+             "-f", str(page), "-l", str(page), str(src), f"{tmp}/p"],
+            check=True, capture_output=True,
+        )
+        pngs = sorted(Path(tmp).glob("*.png"))
+        if not pngs:
+            raise RuntimeError("pdftoppm produced no output")
+        im = Image.open(pngs[0]).convert("L")  # e-ink grayscale
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        return buf.getvalue()
 
-    TL = SCREEN_CORNERS["TL"]
-    TR = SCREEN_CORNERS["TR"]
-    BL = SCREEN_CORNERS["BL"]
-    BR = SCREEN_CORNERS["BR"]
-    PW, PH = page_img.size
-    device  = _device()
-    DW, DH  = device.size
-
-    coeffs = _perspective_coeffs(
-        src_pts=[(0, 0), (PW, 0), (0, PH), (PW, PH)],
-        dst_pts=[TL,     TR,      BL,      BR     ],
-    )
-    warped = page_img.transform((DW, DH), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
-
-    mask = Image.new("L", (DW, DH), 0)
-    ImageDraw.Draw(mask).polygon([TL, TR, BR, BL], fill=255)
-
-    result = device.copy()
-    result.paste(warped, mask=mask)
-
-    result = result.resize((result.width // 2, result.height // 2), Image.LANCZOS)
-    buf = io.BytesIO()
-    result.save(buf, format="JPEG", quality=88)
-    return buf.getvalue()
-
-
-# ── session state ─────────────────────────────────────────────────────────────
-
-class Session:
-    pdf_bytes: bytes | None = None
-    page_count: int = 0
-    filename: str = ""
-
-session = Session()
-
-# ── app ───────────────────────────────────────────────────────────────────────
-
-app = FastAPI()
 
 HTML = """\
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>reCompose Preview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reCompose - RM2 Live Preview</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #1a1a1a; color: #ddd; font-family: system-ui, sans-serif;
-         display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-  header { width: 100%; background: #111; padding: 14px 24px;
-           display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #333; }
-  header h1 { font-size: 1rem; font-weight: 600; color: #fff; letter-spacing: .05em; }
-  header span { font-size: .8rem; color: #888; }
-  .upload-zone { margin: 40px auto; padding: 32px 48px; border: 2px dashed #444;
-                 border-radius: 12px; text-align: center; cursor: pointer; max-width: 480px;
-                 transition: border-color .2s; }
-  .upload-zone:hover { border-color: #888; }
-  .upload-zone input { display: none; }
-  .upload-zone label { cursor: pointer; color: #aaa; font-size: .95rem; }
-  .upload-zone label strong { color: #ddd; }
-  .viewer { display: flex; flex-direction: column; align-items: center; gap: 20px;
-            padding: 32px 16px; width: 100%; }
-  .device-frame { border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.6); max-width: 480px; width: 100%; }
-  .controls { display: flex; align-items: center; gap: 20px; }
-  .btn { background: #333; border: 1px solid #555; color: #ddd; padding: 8px 20px;
-         border-radius: 6px; cursor: pointer; font-size: .9rem; transition: background .15s; }
-  .btn:hover:not(:disabled) { background: #444; }
-  .btn:disabled { opacity: .35; cursor: default; }
-  .page-info { font-size: .9rem; color: #aaa; min-width: 80px; text-align: center; }
-  .filename { font-size: .8rem; color: #666; margin-top: -8px; }
-  #spinner { display: none; color: #888; font-size: .85rem; }
-  .drop-active { border-color: #aaa !important; background: #222; }
+  body { background: #232427; color: #cfcfcf;
+         font-family: system-ui, -apple-system, sans-serif;
+         min-height: 100vh; display: flex; flex-direction: column; }
+  header { background: #15161a; padding: 12px 20px;
+           display: flex; align-items: center; gap: 14px;
+           border-bottom: 1px solid #2c2d33; }
+  header h1 { font-size: .95rem; font-weight: 600; letter-spacing: .04em; color: #fff; }
+  header .file { font-size: .78rem; color: #7d7f86; margin-left: auto; }
+  .stage { flex: 1; display: flex; flex-direction: column;
+           align-items: center; justify-content: center;
+           gap: 20px; padding: 30px 16px; }
+
+  /* reMarkable 2 device frame, drawn in CSS.
+     Light warm-grey body, rounded corners (the bezel), thin metallic edge. */
+  .device { position: relative; background: #e7e7e3; border-radius: 22px;
+            padding: 22px 26px 46px 26px; border: 1px solid #cbcbc6;
+            box-shadow: 0 18px 50px rgba(0,0,0,.55), inset 0 1px 0 #fff; }
+  /* Marker (pen) magnetically attached to the right long edge. */
+  .device .marker { position: absolute; right: -10px; top: 96px;
+            width: 10px; height: 236px;
+            background: linear-gradient(90deg, #9a9a95, #efefe9 45%, #b6b6b0);
+            border-radius: 0 6px 6px 0; box-shadow: 1px 0 2px rgba(0,0,0,.2); }
+  .screen { position: relative; width: 360px; height: 480px;
+            background: #f6f6f3; overflow: hidden;
+            box-shadow: inset 0 0 0 1px #d4d4cf; }
+  .screen img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+  .controls { display: flex; align-items: center; gap: 18px; }
+  .btn { background: #33343a; border: 1px solid #4a4b52; color: #e3e3e3;
+         padding: 9px 20px; border-radius: 7px; cursor: pointer;
+         font-size: .85rem; transition: background .15s; }
+  .btn:hover:not(:disabled) { background: #41424a; }
+  .btn:disabled { opacity: .3; cursor: default; }
+  .page-info { font-size: .85rem; color: #a9abb1; min-width: 96px; text-align: center; }
+  .hint { font-size: .72rem; color: #5f6168; }
 </style>
 </head>
 <body>
-
 <header>
-  <h1>reCompose Preview</h1>
-  <span id="header-file"></span>
+  <h1>reCompose &middot; RM2 Live Preview</h1>
+  <span class="file" id="fname"></span>
 </header>
 
-<div id="upload-section">
-  <div class="upload-zone" id="drop-zone">
-    <input type="file" id="file-input" accept=".pdf">
-    <label for="file-input">
-      <strong>Choose a PDF</strong> or drag it here
-    </label>
+<div class="stage">
+  <div class="device">
+    <div class="marker"></div>
+    <div class="screen"><img id="pg" src="" alt="page"></div>
   </div>
-</div>
-
-<div class="viewer" id="viewer" style="display:none">
-  <div class="filename" id="filename-label"></div>
-  <img class="device-frame" id="mockup-img" src="" alt="RM2 mockup">
-  <div id="spinner">Rendering…</div>
   <div class="controls">
-    <button class="btn" id="btn-prev" onclick="changePage(-1)" disabled>← Prev</button>
-    <div class="page-info" id="page-info">Page 1 / 1</div>
-    <button class="btn" id="btn-next" onclick="changePage(1)" disabled>Next →</button>
+    <button class="btn" id="prev" onclick="go(-1)" disabled>Prev</button>
+    <div class="page-info" id="info">&mdash;</div>
+    <button class="btn" id="next" onclick="go(1)" disabled>Next</button>
   </div>
+  <div class="hint">Auto-watching pipeline output &middot; arrow keys to navigate</div>
 </div>
 
 <script>
-let currentPage = 1;
-let totalPages  = 1;
+let page = 1, pages = 0, ts = 0;
+const img   = document.getElementById('pg');
+const info  = document.getElementById('info');
+const prev  = document.getElementById('prev');
+const next  = document.getElementById('next');
+const fname = document.getElementById('fname');
 
-const dropZone  = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
-const viewer    = document.getElementById('viewer');
-const upload    = document.getElementById('upload-section');
-const img       = document.getElementById('mockup-img');
-const spinner   = document.getElementById('spinner');
-const pageInfo  = document.getElementById('page-info');
-const btnPrev   = document.getElementById('btn-prev');
-const btnNext   = document.getElementById('btn-next');
-
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drop-active'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drop-active'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('drop-active');
-  const f = e.dataTransfer.files[0];
-  if (f && f.name.endsWith('.pdf')) uploadFile(f);
-});
-fileInput.addEventListener('change', e => { if (e.target.files[0]) uploadFile(e.target.files[0]); });
-
-async function uploadFile(file) {
-  const fd = new FormData();
-  fd.append('file', file);
-  spinner.style.display = 'block';
-  const res = await fetch('/upload', { method: 'POST', body: fd });
-  const data = await res.json();
-  totalPages  = data.pages;
-  currentPage = 1;
-  document.getElementById('filename-label').textContent = file.name;
-  document.getElementById('header-file').textContent = file.name;
-  upload.style.display  = 'none';
-  viewer.style.display  = 'flex';
-  await loadPage(1);
+async function poll() {
+  const r = await fetch('/api/state');
+  const s = await r.json();
+  if (s.name !== fname.textContent || s.ts !== ts) {
+    fname.textContent = s.name;
+    ts = s.ts; pages = s.pages;
+    if (page > pages) page = 1;
+    load();
+  }
 }
 
-async function loadPage(n) {
-  spinner.style.display = 'block';
-  img.style.opacity = '0.4';
-  img.src = `/mockup?page=${n}&t=${Date.now()}`;
+function load() {
+  if (!pages) {
+    img.removeAttribute('src');
+    info.textContent = 'no pdf';
+    prev.disabled = next.disabled = true;
+    return;
+  }
+  img.style.opacity = .45;
+  img.src = '/page?n=' + page + '&t=' + ts;
   img.onload = () => {
-    img.style.opacity = '1';
-    spinner.style.display = 'none';
-    pageInfo.textContent = `Page ${n} / ${totalPages}`;
-    btnPrev.disabled = (n <= 1);
-    btnNext.disabled = (n >= totalPages);
-    currentPage = n;
+    img.style.opacity = 1;
+    info.textContent = 'Page ' + page + ' / ' + pages;
+    prev.disabled = page <= 1;
+    next.disabled = page >= pages;
   };
 }
 
-function changePage(delta) {
-  const next = currentPage + delta;
-  if (next >= 1 && next <= totalPages) loadPage(next);
+function go(d) {
+  if (page + d >= 1 && page + d <= pages) { page += d; load(); }
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') changePage(1);
-  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   changePage(-1);
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') go(1);
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   go(-1);
 });
+
+setInterval(poll, 2000);
+poll();
 </script>
 </body>
 </html>
@@ -262,31 +210,46 @@ async def index():
     return HTML
 
 
-@app.post("/upload")
-async def upload(file: UploadFile = File(...)):
-    data = await file.read()
-    session.pdf_bytes  = data
-    session.filename   = file.filename or "document.pdf"
-    session.page_count = _page_count(data)
-    return {"pages": session.page_count, "filename": session.filename}
+@app.get("/api/state")
+async def api_state():
+    _refresh(APP_WATCH_DIR)
+    return {"name": state["name"], "pages": state["pages"], "ts": state["mtime"]}
 
 
-@app.get("/mockup")
-async def mockup(page: int = 1):
-    if not session.pdf_bytes:
-        raise HTTPException(404, "No PDF uploaded")
-    page = max(1, min(page, session.page_count))
-    page_img = _pdf_page(session.pdf_bytes, page)
-    jpg = _composite(page_img, grayscale=True)
-    return Response(content=jpg, media_type="image/jpeg")
+@app.get("/page")
+async def page(n: int = 1):
+    _refresh(APP_WATCH_DIR)
+    if not state["path"]:
+        raise HTTPException(404, "No PDF in watch directory")
+    pdf = Path(state["path"])
+    n = max(1, min(n, state["pages"]))
+    try:
+        png = _render_page(pdf, n)
+    except Exception as e:
+        raise HTTPException(500, f"render failed: {e}")
+    return Response(content=png, media_type="image/png")
+
+
+APP_WATCH_DIR = DEFAULT_DIR
 
 
 def main():
-    ap = argparse.ArgumentParser(description="reCompose browser preview")
+    global APP_WATCH_DIR
+    ap = argparse.ArgumentParser(description="reCompose RM2 live preview")
     ap.add_argument("--port", type=int, default=7700)
+    ap.add_argument("--dir", type=str, default=str(DEFAULT_DIR),
+                    help="Directory to watch for the latest *.pdf")
     args = ap.parse_args()
-    print(f"  reCompose preview → http://localhost:{args.port}")
-    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning")
+    APP_WATCH_DIR = Path(args.dir).expanduser()
+    print(f"  reCompose RM2 preview -> http://localhost:{args.port}")
+    print(f"  watching: {APP_WATCH_DIR}")
+    uvicorn_run(app, args.port)
+
+
+# Lazy import uvicorn so --help works without it installed.
+def uvicorn_run(app, port):
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
 
 if __name__ == "__main__":

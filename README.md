@@ -147,6 +147,44 @@ becomes `X`.
 
 ---
 
+## Live preview
+
+`rm2_preview.py` serves a live, browser-based **reMarkable 2 device frame** on
+`http://localhost:7700`. It auto-watches your pipeline output directory and
+shows the most recently built PDF, page by page — no upload step. As soon as a
+new PDF lands in the watched folder, the preview refreshes.
+
+```bash
+# defaults: port 7700, watches ~/vault/dev/projects/rm2-pipeline/
+python3 rm2_preview.py
+
+# custom port / custom directory
+python3 rm2_preview.py --port 8080 --dir /path/to/output
+```
+
+- Navigate pages with the **Prev / Next** buttons or the **arrow keys**.
+- The device is drawn in CSS (visible bezel, rounded corners, e-ink grayscale),
+  so pages fill the screen exactly with no distortion.
+- Pages are rendered with `pdftoppm` at native RM2 DPI (226) and converted to
+  grayscale to match the e-ink display.
+
+> **Why a CSS frame instead of the device photo?** The CC-licensed RM2 photo on
+> Wikimedia is a "screen-on" flat-lay where the display is a transparent window
+> onto the grey surface behind the tablet. Compositing a report into that photo
+> leaves a grey ring (the surface showing through) and the corners never align.
+> The drawn frame gives pixel-accurate alignment and a proper bezel. Use
+> `rm2_mockup.py` when you specifically want a still composited into the real
+> device photo for sharing.
+
+Requires `fastapi`, `uvicorn`, `pillow`, and `poppler-utils` (`pdftoppm`/`pdfinfo`).
+
+```bash
+pip install fastapi uvicorn pillow
+sudo apt install poppler-utils
+```
+
+---
+
 ## Device mockup
 
 `rm2_mockup.py` composites a built PDF (or any PNG) into a photograph of a real RM2, so you can see how a page looks on the actual device before transferring it.
@@ -177,6 +215,7 @@ reCompose/
 ├── rm2.latex        # Pandoc LaTeX template
 ├── fix_tables.py    # longtable → xltabular transformer
 ├── Makefile         # Three-pass build automation
+├── rm2_preview.py   # Live browser preview (CSS device frame, auto-watch)
 ├── rm2_mockup.py    # Composite PDF pages into device photo
 ├── rm2_device.jpg   # CC BY-SA 4.0 device photo (Wikimedia Commons)
 ├── example/
