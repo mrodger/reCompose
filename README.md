@@ -147,15 +147,40 @@ becomes `X`.
 
 ---
 
+## Device mockup
+
+`rm2_mockup.py` composites a built PDF (or any PNG) into a photograph of a real RM2, so you can see how a page looks on the actual device before transferring it.
+
+```bash
+# pip install Pillow  (poppler-utils for PDF input)
+
+# Single page
+python3 rm2_mockup.py my-document.pdf
+
+# Specific page, full-size output
+python3 rm2_mockup.py my-document.pdf --page 3 --scale 1.0 --out page3_preview.png
+
+# All pages as separate images
+python3 rm2_mockup.py my-document.pdf --all-pages
+```
+
+Output is a PNG of the device photo with your page composited into the screen area, converted to grayscale to simulate e-ink rendering. Pass `--no-grayscale` to keep colour.
+
+The device photo (`rm2_device.jpg`) is by [Axel Dgn](https://commons.wikimedia.org/wiki/File:Remarkable_2_with_standard_marker.jpg), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), Wikimedia Commons.
+
+---
+
 ## File map
 
 ```
 reCompose/
-├── rm2.latex       # Pandoc LaTeX template
-├── fix_tables.py   # longtable → xltabular transformer
-├── Makefile        # Three-pass build automation
+├── rm2.latex        # Pandoc LaTeX template
+├── fix_tables.py    # longtable → xltabular transformer
+├── Makefile         # Three-pass build automation
+├── rm2_mockup.py    # Composite PDF pages into device photo
+├── rm2_device.jpg   # CC BY-SA 4.0 device photo (Wikimedia Commons)
 ├── example/
-│   └── example.md  # Sample document demonstrating all features
+│   └── example.md   # Sample document demonstrating all features
 └── README.md
 ```
 
