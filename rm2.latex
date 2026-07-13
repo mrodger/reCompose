@@ -1,0 +1,239 @@
+% rm2.latex — Pandoc template for reMarkable 2 (1404×1872, 226DPI e-ink)
+% Geometry: 157.8mm × 210.4mm, 4mm margins
+% Fonts: Linux Libertine ecosystem (optimized for e-ink legibility)
+
+\documentclass[
+  11pt,
+  twoside=no,
+  open=any,
+]{$documentclass$}
+
+% ── RM2 exact geometry ──────────────────────────────────────────
+\paperwidth=157.8mm
+\paperheight=210.4mm
+\usepackage[
+  margin=10mm,
+  footskip=6mm,
+  headsep=2mm,
+  headheight=0pt,
+  includehead=false,
+  includefoot=false,
+]{geometry}
+
+% ── Fonts (xelatex — OpenType, no fontenc) ──────────────────────
+\usepackage{iftex}
+\ifPDFTeX
+  \PackageError{rm2}{This template requires xelatex or lualatex.}{}
+\else
+  \usepackage{fontspec}
+  \defaultfontfeatures{Ligatures=TeX,Scale=MatchLowercase}
+  \setmainfont{Linux Libertine O}[
+    UprightFont    = *,
+    BoldFont       = * Bold,
+    ItalicFont     = * Italic,
+    BoldItalicFont = * Bold Italic,
+    Numbers        = OldStyle,
+  ]
+  \setsansfont{Linux Biolinum O}[
+    UprightFont    = *,
+    BoldFont       = * Bold,
+    ItalicFont     = * Italic,
+  ]
+  \setmonofont{Linux Libertine Mono O}[
+    Scale=MatchLowercase,
+  ]
+\fi
+
+% ── Packages ─────────────────────────────────────────────────────
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage[font={small},labelfont={bf,sf},labelsep=period,skip=4pt]{caption}
+\usepackage{booktabs,array}
+\usepackage{xltabular}              % xltabular = longtable+tabularx hybrid (native page-breaking X columns)
+\usepackage{ragged2e}               % intelligent ragged-right with hyphenation
+\usepackage{calc}                   % required by pandoc's \real{} column width macros
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{parskip}
+\usepackage{enumitem}
+\usepackage[protrusion=true]{microtype} % optical margin alignment — XeLaTeX supports protrusion only
+
+% ── Grayscale-optimized color palette ────────────────────────────
+% No colors — e-ink is grayscale. Use black with varying weights.
+\definecolor{headingcolor}{gray}{0.0}
+\definecolor{linkcolor}{gray}{0.15}
+\definecolor{citecolor}{gray}{0.15}
+\definecolor{urlcolor}{gray}{0.15}
+\definecolor{rulecolor}{gray}{0.55}
+\definecolor{tablehead}{gray}{0.12}
+\definecolor{codeprompt}{gray}{0.25}
+
+% ── Typography ───────────────────────────────────────────────────
+\usepackage{setspace}
+\usepackage{soul}   % \st{} strikethrough from pandoc strikethrough syntax
+$if(linestretch)$
+\setstretch{$linestretch$}
+$else$
+\setstretch{1.15}
+$endif$
+
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+\setlength{\parskip}{5pt plus 1pt minus 1pt}
+\setlength{\parindent}{0pt}
+\setlength{\emergencystretch}{2em}
+\tolerance=400      % allow looser line breaks — important for narrow 137mm column
+\pretolerance=100
+
+% Prevent widows/orphans — critical on small e-ink pages
+\widowpenalties 1 10000
+\clubpenalties  1 10000
+
+% ── Section headings — Biolinum (sans serif for contrast) ──────
+\usepackage{titlesec}
+\titleformat{\section}
+  {\sffamily\bfseries\large\color{headingcolor}}
+  {\thesection}{0.5em}{}
+  [\vspace{0.1em}\rule{\textwidth}{1.5pt}]
+\titleformat{\subsection}
+  {\sffamily\bfseries\color{headingcolor}}
+  {\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}
+  {\sffamily\bfseries\itshape\color{headingcolor}}
+  {\thesubsubsection}{0.5em}{}
+\titleformat{\paragraph}[runin]
+  {\sffamily\bfseries}
+  {\theparagraph}{0.5em}{}[. \ ]
+
+\titlespacing{\section}{0pt}{8pt plus 2pt}{4pt}
+\titlespacing{\subsection}{0pt}{6pt plus 2pt}{3pt}
+\titlespacing{\subsubsection}{0pt}{5pt plus 1pt}{2pt}
+
+% ── Headers/footers — minimal ───────────────────────────────────
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[C]{\sffamily\footnotesize\color{gray!60}\thepage}
+\setlength{\footskip}{6mm}
+
+% ── Tables — clean, e-ink friendly ──────────────────────────────
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\renewcommand{\arraystretch}{1.6}
+% Thinner rules for e-ink
+\setlength{\heavyrulewidth}{0.8pt}
+\setlength{\lightrulewidth}{0.4pt}
+\setlength{\cmidrulewidth}{0.4pt}
+% Dense table mitigation: small body + suppress hyphenation in narrow cells
+\AtBeginEnvironment{tabularx}{\small\hyphenpenalty=1000\exhyphenpenalty=1000}
+\AtBeginEnvironment{xltabular}{\small\hyphenpenalty=1000\exhyphenpenalty=1000}
+\AtBeginEnvironment{longtable}{\small\hyphenpenalty=1000\exhyphenpenalty=1000}
+
+% ── Code blocks — no syntax colouring (grayscale only) ──────────
+% Let pandoc define Shaded/Highlighting, but override colors to grayscale
+\usepackage{framed}
+\usepackage{tocloft}
+% TOC — tighter spacing, sans fonts
+\setlength{\cftbeforesecskip}{2pt}
+\setlength{\cftbeforesubsecskip}{0pt}
+\renewcommand{\cftsecfont}{\sffamily\small\bfseries}
+\renewcommand{\cftsubsecfont}{\sffamily\small}
+\renewcommand{\cftsecpagefont}{\sffamily\small}
+\renewcommand{\cftsubsecpagefont}{\sffamily\small}
+\renewcommand{\cftdotsep}{3}
+\definecolor{shadecolor}{gray}{0.91}
+
+$if(highlighting-macros)$
+% Pandoc's default highlighting macros — rendered in grayscale on e-ink
+$highlighting-macros$
+$endif$
+
+% Code blocks — small font (mono is wider than serif; prevents overflow on 137mm column)
+\AtBeginEnvironment{Shaded}{\small}
+
+% Inline code — bold sffamily, no background (colorbox renders poorly on RM2)
+\renewcommand{\texttt}[1]{{\sffamily\footnotesize\bfseries #1}}
+
+% ── Lists — compact ─────────────────────────────────────────────
+\setlist{nosep, leftmargin=*, itemsep=1pt, topsep=2pt}
+\setlist[description]{font=\sffamily\bfseries}
+
+% ── Blockquotes — subtle rule ───────────────────────────────────
+\usepackage{etoolbox}
+\AtBeginEnvironment{quote}{\small\itshape}
+\AtBeginEnvironment{quotation}{\small}
+
+% ── Links — subtle underline, no colour ─────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=linkcolor,
+  citecolor=citecolor,
+  urlcolor=urlcolor,
+  pdfcreator={pandoc + rm2.latex},
+  pdfborder={0 0 0},
+}
+\urlstyle{same}
+
+% ── Title block — compact ───────────────────────────────────────
+$if(title)$
+\usepackage{titling}
+\pretitle{\begin{center}\sffamily\bfseries\LARGE}
+$if(subtitle)$
+\posttitle{\par\end{center}\vspace{3pt}{\begin{center}\sffamily\large\itshape $subtitle$\end{center}}\vspace{4pt}}
+$else$
+\posttitle{\par\end{center}\vspace{4pt}}
+$endif$
+\preauthor{\begin{center}\sffamily\small}
+\postauthor{\end{center}\vspace{2pt}}
+\predate{\begin{center}\sffamily\footnotesize\color{gray!60}}
+\postdate{\par\end{center}\vspace{-8pt}}
+\title{$title$}
+$if(author)$\author{$for(author)$$author$$sep$ \and $endfor$}$else$\author{}$endif$
+$if(date)$\date{$date$}$else$\date{}$endif$
+$endif$
+
+% ── Images — scale to fit, no overflow ──────────────────────────
+\setkeys{Gin}{width=\textwidth,height=0.85\textheight,keepaspectratio}
+
+% ── Horizontal rules ────────────────────────────────────────────
+\renewcommand{\hrulefill}{%
+  \leavevmode\leaders\hrule height 0.4pt\hfill\kern0pt
+}
+
+$if(dir)$
+\ifPDFTeX
+  \TeXXeTstate=1
+  \newcommand{\RL}[1]{\beginR #1\endR}
+  \newcommand{\LR}[1]{\beginL #1\endL}
+  \newenvironment{RTL}{\beginR}{\endR}
+  \newenvironment{LTR}{\beginL}{\endL}
+\fi
+$endif$
+
+$for(header-includes)$
+$header-includes$
+$endfor$
+
+\begin{document}
+
+$if(title)$
+\maketitle
+$endif$
+
+$if(toc)$
+{
+\hypersetup{linkcolor=linkcolor}
+\setcounter{tocdepth}{$toc-depth$}
+\tableofcontents
+}
+$endif$
+
+$if(linestretch)$
+\setstretch{$linestretch$}
+$endif$
+
+$body$
+
+\end{document}
