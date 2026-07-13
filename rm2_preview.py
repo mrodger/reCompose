@@ -17,21 +17,25 @@ import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, Response
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # ── mockup logic (inlined from rm2_mockup.py) ────────────────────────────────
 
 HERE         = Path(__file__).resolve().parent
 DEVICE_IMAGE = HERE / "rm2_device.jpg"
 
-SCREEN_LEFT   = 185
-SCREEN_TOP    = 214
-SCREEN_RIGHT  = 1779
-SCREEN_BOTTOM = 2477
-EINK_BG       = (215, 218, 220)
+# Screen corners measured by Sobel edge detection on the 1860×2556 device photo.
+# Top is 15px wider than bottom (camera keystone) — perspective warp corrects it.
+SCREEN_CORNERS = {
+    "TL": (183, 257),
+    "TR": (1775, 253),
+    "BL": (194, 2475),
+    "BR": (1771, 2470),
+}
 
 _device_cache: Image.Image | None = None
 
@@ -40,6 +44,16 @@ def _device() -> Image.Image:
     if _device_cache is None:
         _device_cache = Image.open(DEVICE_IMAGE).convert("RGB")
     return _device_cache
+
+
+def _perspective_coeffs(src_pts, dst_pts):
+    A, b = [], []
+    for (xs, ys), (xd, yd) in zip(src_pts, dst_pts):
+        A.append([xd, yd, 1, 0,  0,  0, -xs*xd, -xs*yd])
+        A.append([0,  0,  0, xd, yd, 1, -ys*xd, -ys*yd])
+        b.extend([xs, ys])
+    coeffs, _, _, _ = np.linalg.lstsq(np.array(A), np.array(b), rcond=None)
+    return tuple(float(c) for c in coeffs)
 
 
 def _pdf_page(pdf_bytes: bytes, page: int, dpi: int = 226) -> Image.Image:
@@ -71,26 +85,30 @@ def _page_count(pdf_bytes: bytes) -> int:
 
 
 def _composite(page_img: Image.Image, grayscale: bool = True) -> bytes:
-    sw = SCREEN_RIGHT  - SCREEN_LEFT
-    sh = SCREEN_BOTTOM - SCREEN_TOP
-
     if grayscale:
         page_img = page_img.convert("L").convert("RGB")
 
-    pw, ph = page_img.size
-    scale = min(sw / pw, sh / ph)
-    nw, nh = int(pw * scale), int(ph * scale)
-    page_rs = page_img.resize((nw, nh), Image.LANCZOS)
+    TL = SCREEN_CORNERS["TL"]
+    TR = SCREEN_CORNERS["TR"]
+    BL = SCREEN_CORNERS["BL"]
+    BR = SCREEN_CORNERS["BR"]
+    PW, PH = page_img.size
+    device  = _device()
+    DW, DH  = device.size
 
-    canvas = Image.new("RGB", (sw, sh), EINK_BG)
-    canvas.paste(page_rs, ((sw - nw) // 2, (sh - nh) // 2))
+    coeffs = _perspective_coeffs(
+        src_pts=[(0, 0), (PW, 0), (0, PH), (PW, PH)],
+        dst_pts=[TL,     TR,      BL,      BR     ],
+    )
+    warped = page_img.transform((DW, DH), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
 
-    result = _device().copy()
-    result.paste(canvas, (SCREEN_LEFT, SCREEN_TOP))
+    mask = Image.new("L", (DW, DH), 0)
+    ImageDraw.Draw(mask).polygon([TL, TR, BR, BL], fill=255)
 
-    # Downscale to 50% for browser display
+    result = device.copy()
+    result.paste(warped, mask=mask)
+
     result = result.resize((result.width // 2, result.height // 2), Image.LANCZOS)
-
     buf = io.BytesIO()
     result.save(buf, format="JPEG", quality=88)
     return buf.getvalue()
