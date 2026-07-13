@@ -150,23 +150,36 @@ becomes `X`.
 ## Live preview
 
 `rm2_preview.py` serves a live, browser-based **reMarkable 2 device frame** on
-`http://localhost:7700`. It auto-watches your pipeline output directory and
-shows the most recently built PDF, page by page — no upload step. As soon as a
-new PDF lands in the watched folder, the preview refreshes.
+`http://localhost:7700`. It shows a chosen PDF inside a clean CSS device frame
+(visible bezel, rounded corners, e-ink grayscale). Every page is pre-rendered
+into a memory cache and preloaded by the browser, so Prev/Next navigation is
+instant.
 
 ```bash
-# defaults: port 7700, watches ~/vault/dev/projects/rm2-pipeline/
+# Pin a specific document (substring match inside the watch dir;
+# the latest match by mtime wins). Shows title + page count in the header.
+python3 rm2_preview.py --file lyzr-platform-analysis-v2
+
+# Or just serve the most recently built PDF in the watch dir:
 python3 rm2_preview.py
 
-# custom port / custom directory
+# Custom port / custom directory:
 python3 rm2_preview.py --port 8080 --dir /path/to/output
 ```
 
-- Navigate pages with the **Prev / Next** buttons or the **arrow keys**.
-- The device is drawn in CSS (visible bezel, rounded corners, e-ink grayscale),
-  so pages fill the screen exactly with no distortion.
-- Pages are rendered with `pdftoppm` at native RM2 DPI (226) and converted to
-  grayscale to match the e-ink display.
+- The header shows the **document title** (extracted from page 1), the
+  **page count**, and the source filename.
+- Navigate with the **Prev / Next** buttons or **arrow keys**.
+- Pages **fill the screen exactly** — no grey ring, no distortion.
+
+There is also a convenience launcher that runs the server as a persistent
+background process (logs to `~/rm2_preview.log`):
+
+```bash
+./start_preview.sh                       # latest built PDF
+./start_preview.sh lyzr-platform-analysis-v2   # pin a document
+# Stop it with:  pkill -f rm2_preview.py
+```
 
 > **Why a CSS frame instead of the device photo?** The CC-licensed RM2 photo on
 > Wikimedia is a "screen-on" flat-lay where the display is a transparent window
@@ -215,7 +228,8 @@ reCompose/
 ├── rm2.latex        # Pandoc LaTeX template
 ├── fix_tables.py    # longtable → xltabular transformer
 ├── Makefile         # Three-pass build automation
-├── rm2_preview.py   # Live browser preview (CSS device frame, auto-watch)
+├── rm2_preview.py   # Live browser preview (CSS device frame, preloaded pages)
+├── start_preview.sh # Launcher: run the preview as a background service
 ├── rm2_mockup.py    # Composite PDF pages into device photo
 ├── rm2_device.jpg   # CC BY-SA 4.0 device photo (Wikimedia Commons)
 ├── example/
