@@ -2,8 +2,8 @@
 """rm2_mockup.py — Composite a PDF page or PNG into a reMarkable 2 device photo.
 
 Usage:
-  python3 ~/tools/rm2_mockup.py document.pdf [options]
-  python3 ~/tools/rm2_mockup.py page.png [options]
+  python3 rm2_mockup.py document.pdf [options]
+  python3 rm2_mockup.py page.png [options]
 
 Options:
   --page N        PDF page to render (1-indexed, default: 1)
@@ -13,7 +13,7 @@ Options:
   --all-pages     Export every page; output files are <stem>_rm2_p01.png etc.
   --no-grayscale  Keep colour (default: convert to grayscale to simulate e-ink)
 
-Device image:  ~/tools/rm2_device.jpg  (CC BY-SA 4.0, Wikimedia Commons)
+Device image:  rm2_device.jpg (alongside this script, CC BY-SA 4.0, Wikimedia Commons)
 Screen corners measured via Sobel edge detection on the 1860×2556 photo:
   TL=(183,257)  TR=(1775,253)  BL=(194,2475)  BR=(1771,2470)
 The screen has a 15px keystone (top 1592px wide, bottom 1577px wide) from
@@ -118,12 +118,25 @@ def _load_page(path: Path, page: int, dpi: int) -> Image.Image:
     return Image.open(path).convert("RGB")
 
 
-def _page_count(pdf: Path) -> int:
-    out = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, text=True)
-    for line in out.stdout.splitlines():
-        if line.startswith("Pages:"):
-            return int(line.split()[-1])
-    return 1
+def _page_count(pdf: Path, dpi: int = 226) -> int:
+    """Count pages with pdftoppm (already required for compositing), probing
+    one page at a time until rendering fails. This keeps a single page-count
+    source of truth with rm2_preview.py — both derive the count from pdftoppm
+    output, so no separate pdfinfo dependency is needed.
+    """
+    n = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        while True:
+            n += 1
+            r = subprocess.run(
+                ["pdftoppm", "-r", str(dpi), "-png",
+                 "-f", str(n), "-l", str(n), str(pdf), f"{tmp}/p"],
+                capture_output=True,
+            )
+            if r.returncode != 0 or not list(Path(tmp).glob(f"p-{n}.png")):
+                n -= 1
+                break
+    return max(n, 1)
 
 
 def main():

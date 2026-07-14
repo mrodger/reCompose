@@ -17,11 +17,18 @@ document.tex
   ▼  [2] fix_tables.py  (longtable → xltabular, p{} cols → X)
 document.tex  (patched)
   │
+  ▼  [2.5] Bibliography spacing — tighten \parskip/\setstretch in the refs block
+document.tex  (patched)
+  │
   ▼  [3] XeLaTeX
 document.pdf  (157.8 mm × 210.4 mm, grayscale-optimised)
 ```
 
-Three passes. One command.
+Three passes (plus a small [2.5] post-processing step). One command.
+
+The `[2.5]` step runs a `sed` pass that wraps the bibliography block in a
+`\begingroup` / `\endgroup` with tighter `\parskip` and `\setstretch{1.25}`,
+so references don't sprawl on the small RM2 page before the final XeLaTeX run.
 
 ---
 
@@ -189,7 +196,9 @@ background process (logs to `~/rm2_preview.log`):
 > `rm2_mockup.py` when you specifically want a still composited into the real
 > device photo for sharing.
 
-Requires `fastapi`, `uvicorn`, `pillow`, and `poppler-utils` (`pdftoppm`/`pdfinfo`).
+Requires `fastapi`, `uvicorn`, `pillow`, and `poppler-utils` (`pdftoppm`).
+Page counts for both the preview and the mockup are derived from `pdftoppm`
+rendered pages, so `pdfinfo` is no longer needed.
 
 ```bash
 pip install fastapi uvicorn pillow

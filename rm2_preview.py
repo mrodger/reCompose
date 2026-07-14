@@ -3,8 +3,9 @@
 
 Serves http://localhost:7700
 
-Shows a chosen PDF (default: the latest built in the pipeline output dir)
-page by page, rendered inside a clean CSS reMarkable 2 device frame (real
+Shows a chosen PDF (default: the latest built in the current directory;
+override the watch location with --dir) page by page, rendered inside a clean
+CSS reMarkable 2 device frame (real
 bezel, rounded corners, e-ink grayscale). Every page is pre-rendered into a
 memory cache and preloaded by the browser, so Prev/Next navigation is instant.
 
@@ -35,7 +36,10 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from PIL import Image
 
-DEFAULT_DIR = Path.home() / "vault" / "dev" / "projects" / "rm2-pipeline"
+# Default watch directory: the current working directory, so `make` output
+# (built in cwd) is previewed by simply running `python3 rm2_preview.py`.
+# Override with --dir if your PDFs live elsewhere.
+DEFAULT_DIR = Path.cwd()
 
 app = FastAPI()
 

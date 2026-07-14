@@ -1,5 +1,5 @@
 % rm2.latex — Pandoc template for reMarkable 2 (1404×1872, 226DPI e-ink)
-% Geometry: 157.8mm × 210.4mm, 4mm margins
+% Geometry: 157.8mm × 210.4mm, 10mm margins
 % Fonts: Linux Libertine ecosystem (optimized for e-ink legibility)
 
 \documentclass[
