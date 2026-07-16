@@ -90,6 +90,13 @@ $endif$
 \widowpenalties 1 10000
 \clubpenalties  1 10000
 
+% ── Section numbering — off by default; set numbersections: true in YAML ──
+$if(numbersections)$
+\setcounter{secnumdepth}{$if(secnumdepth)$$secnumdepth$$else$3$endif$}
+$else$
+\setcounter{secnumdepth}{-1}
+$endif$
+
 % ── Section headings — Biolinum (sans serif for contrast) ──────
 \usepackage{titlesec}
 \titleformat{\section}

@@ -1,5 +1,15 @@
 # reCompose
 
+Full round-trip pipeline for the **reMarkable 2** e-ink tablet: extract structured content from academic PDFs and reformat them for the RM2 canvas, or convert your own Markdown directly to e-ink-optimised PDFs.
+
+## Screenshots
+
+| Tech doc (TOC + tables) | Appendix with image wrap | Novel prose |
+|---|---|---|
+| ![tech doc](screenshots/tech-doc.png) | ![appendix](screenshots/appendix-stoicism.png) | ![prose](screenshots/prose-novel.png) |
+
+---
+
 Convert Markdown documents to PDFs optimised for the **reMarkable 2** e-ink display.
 
 The reMarkable 2 renders at 1404 × 1872 px on a 10.3″ grayscale screen. Standard A4/Letter PDFs are illegible without pinch-zoom. reCompose pre-formats the page to the exact RM2 canvas so documents are readable at native scale with no on-device adjustment.
@@ -154,6 +164,127 @@ becomes `X`.
 
 ---
 
+## Extracting from academic PDFs
+
+`pdf_extract.py` converts an academic PDF (paper, thesis, report) into clean Markdown suitable for the reCompose pipeline. It uses Gemini Vision page-by-page, then assembles the output.
+
+```bash
+# pip install pymupdf pillow
+# apt install poppler-utils
+# export OPENROUTER_API_KEY=sk-or-...
+
+# Extract a paper
+python3 pdf_extract.py paper.pdf
+
+# Thesis mode (chapter-aware headings)
+python3 pdf_extract.py thesis.pdf --thesis --out thesis_extracted/
+```
+
+Output in `<stem>_extracted/`:
+- `text.md` — prose + LaTeX math + figure placeholders
+- `tables.md` — all tables as Markdown
+- `figures/` — cropped figure images at 200 DPI
+- `extracted.json` — raw API responses for debugging
+
+Then build:
+
+```bash
+cp paper_extracted/text.md build/
+cd build && make text.pdf
+```
+
+Or use `recompose.py` for the full round-trip in one command (see below).
+
+### Academic PDF notes
+
+- **Math** is returned as LaTeX (`$...$` inline, `$$...$$` display) — not prose descriptions.
+- **Two-column layouts** (journal format) are linearised: left column then right.
+- **Theses** often have complex LaTeX-generated structure. Use `--thesis` to get chapter-level `#` headings. Section numbering is stripped from headings by default; add `numbersections: true` to the YAML frontmatter if you want them in the output.
+- **Figures** are cropped using pymupdf text block positions to locate the caption boundary, not Gemini bounding boxes (which are in PDF point space, not pixel space).
+- **References** pages use a lighter prompt that captures full citation strings.
+
+---
+
+## Round-trip with recompose.py
+
+`recompose.py` is a deterministic CLI wrapper over the full pipeline. No LLM is needed for the Markdown → PDF build step; Gemini is only called during extraction.
+
+```bash
+# Extract only
+python3 recompose.py extract paper.pdf
+
+# Build only (from existing markdown)
+python3 recompose.py build paper_extracted/text.md
+
+# Full round-trip: extract → build → upload to GDrive
+python3 recompose.py roundtrip paper.pdf --upload
+
+# Round-trip a thesis, custom output name, no GDrive upload
+python3 recompose.py roundtrip thesis.pdf --thesis --rename "Smith2024-RM" --no-upload
+```
+
+---
+
+## Layout recipes
+
+### Appendix page with image wrap
+
+```markdown
+---
+title: "Book Title"
+toc: false
+header-includes: |
+  \usepackage{wrapfig}
+  \usepackage{textcase}
+  \fancyfoot[L]{\sffamily\footnotesize\color{gray!60}BOOK TITLE \textbullet\ APPENDIX A}
+  \fancyfoot[R]{\sffamily\footnotesize\color{gray!60}\thepage}
+  \fancyfoot[C]{}
+  \newcommand{\appendixlabel}[2]{%
+    {\sffamily\footnotesize\bfseries\MakeUppercase{Appendix #1}}\par\vspace{2pt}%
+    {\rmfamily\Huge\bfseries #2}\par\vspace{12pt}%
+  }
+---
+
+\appendixlabel{A}{Chapter Title}
+
+\begin{wrapfigure}{r}{0.35\textwidth}
+\includegraphics[width=0.35\textwidth]{image.jpg}
+\par\vspace{4pt}
+{\sffamily\footnotesize Image caption here}
+\end{wrapfigure}
+
+\textsc{First word} of the appendix text...
+```
+
+### Novel prose (indented paragraphs, ragged-right, custom footer)
+
+```markdown
+---
+toc: false
+header-includes: |
+  \usepackage{ragged2e}
+  \RaggedRight
+  \fancyfoot[L]{\sffamily\footnotesize\color{gray!60}BOOK TITLE \textbullet\ CHAPTER VII}
+  \fancyfoot[R]{\sffamily\footnotesize\color{gray!60}142}
+  \fancyfoot[C]{}
+  \AtBeginDocument{\setlength{\parindent}{1.5em}\setlength{\parskip}{0pt}}
+---
+```
+
+> Omit `title:` from frontmatter to prevent `\maketitle` calling `\thispagestyle{plain}` on page 1, which would override the custom footer.
+
+### Section numbering (off by default)
+
+```yaml
+---
+title: "Technical Report"
+numbersections: true
+secnumdepth: 3
+---
+```
+
+---
+
 ## Live preview
 
 `rm2_preview.py` serves a live, browser-based **reMarkable 2 device frame** on
@@ -234,13 +365,16 @@ The device photo (`rm2_device.jpg`) is by [Axel Dgn](https://commons.wikimedia.o
 
 ```
 reCompose/
-├── rm2.latex        # Pandoc LaTeX template
+├── recompose.py     # CLI: extract / build / roundtrip
+├── pdf_extract.py   # PDF → markdown + figures + tables (Gemini Vision)
 ├── fix_tables.py    # longtable → xltabular transformer
+├── rm2.latex        # Pandoc LaTeX template
 ├── Makefile         # Three-pass build automation
 ├── rm2_preview.py   # Live browser preview (CSS device frame, preloaded pages)
 ├── start_preview.sh # Launcher: run the preview as a background service
 ├── rm2_mockup.py    # Composite PDF pages into device photo
 ├── rm2_device.jpg   # CC BY-SA 4.0 device photo (Wikimedia Commons)
+├── screenshots/     # Example output images
 ├── example/
 │   └── example.md   # Sample document demonstrating all features
 └── README.md
