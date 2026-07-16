@@ -206,11 +206,58 @@ def _sniff_page_type(pdf_path: pathlib.Path, page_idx: int) -> str | None:
 
 # ── Markdown post-processing ──────────────────────────────────────────────────
 
+def _fix_math_spans(text_md: str) -> str:
+    r"""Fix math and currency $ issues so pandoc + XeLaTeX don't misparse.
+
+    Pandoc inline math rules for $...$:
+    - Opening $ must not be followed by whitespace
+    - Closing $ must not be preceded by whitespace
+    - Closing $ must not be followed by a digit
+
+    Strategy:
+    1. Protect valid math spans (content contains \) with a placeholder
+    2. Escape remaining bare $DIGIT as currency: \$
+    3. Restore math spans
+    4. Fix closing $ before digit inside math: $\cmd$DIGIT → $\cmd DIGIT$
+    """
+    # Step 1: protect valid math spans $\latex...$ (any span containing a backslash)
+    protected: dict[str, str] = {}
+    counter = [0]
+
+    def _protect(m: re.Match) -> str:
+        content = m.group(1)
+        if '\\' in content:
+            key = f'__MATH{counter[0]}__'
+            protected[key] = m.group(0)
+            counter[0] += 1
+            return key
+        return m.group(0)
+
+    # Match non-greedy single-line math spans
+    text_md = re.sub(r'\$([^$\n]+?)\$', _protect, text_md)
+
+    # Step 2: escape remaining $ before digits — these are currency
+    text_md = re.sub(r'(?<!\\)\$(?=\d)', r'\\$', text_md)
+
+    # Step 3: restore protected math spans
+    for key, val in protected.items():
+        text_md = text_md.replace(key, val)
+
+    # Step 4: fix closing $ immediately before a digit inside a math span
+    # e.g. $\sim$1.2k → $\sim 1.2k$ (pulls digit sequence into the span)
+    # Only for short spans starting with \ to avoid false positives
+    text_md = re.sub(r'\$(\\[^$]{1,40}?)\$(\d[\d.,a-zA-Z]*)', r'$\1 \2$', text_md)
+
+    return text_md
+
+
 def _clean_text(text_md: str) -> str:
     # Strip inline section numbers from headings: ## 1 Introduction → ## Introduction
     text_md = re.sub(r'^(#{1,4})\s+\d+(\.\d+)*\.?\s+', r'\1 ', text_md, flags=re.MULTILINE)
     # Remove orphan page numbers (standalone digit lines)
     text_md = re.sub(r'^\s*\d{1,4}\s*$', '', text_md, flags=re.MULTILINE)
+    # Fix math delimiter issues before pandoc sees the markdown
+    text_md = _fix_math_spans(text_md)
     # Collapse excess blank lines
     text_md = re.sub(r'\n{3,}', '\n\n', text_md)
     return text_md.strip()
