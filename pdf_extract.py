@@ -87,7 +87,7 @@ def _gemini(api_key: str, image_path: pathlib.Path, prompt: str) -> dict:
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
-EXTRACT_PROMPT = """You are extracting content from one page of an academic PDF for reformatting as a clean e-ink document optimised for the reMarkable 2 tablet (138mm text column, grayscale).
+EXTRACT_PROMPT = """You are transcribing one page of an academic PDF into structured JSON. Your job is faithful, accurate extraction — do NOT rewrite, reformat, or editorialize. Reproduce content exactly as it appears.
 
 CRITICAL RULES:
 1. All mathematical expressions MUST be returned as LaTeX:
@@ -97,6 +97,7 @@ CRITICAL RULES:
 2. If the page has TWO COLUMNS, read left column fully first, then right column. Linearise into a single flow.
 3. Strip: page numbers, running headers (journal name, author name, chapter title repeated at top), and footers.
 4. Preserve: footnotes — append them at the end of the text field as "^[footnote text]" inline markers.
+5. Do NOT convert prose to lists. Do NOT bold words that were not bold in the original. Do NOT split or merge paragraphs. Transcribe what is there.
 
 HEADING HIERARCHY — follow strictly:
 - # (h1): Paper title only, and only if this is the title page. Never use # for section headings.
@@ -104,29 +105,6 @@ HEADING HIERARCHY — follow strictly:
 - ### (h3): Subsections. PRESERVE the number: "2.1 Background" → ### 2.1 Background
 - #### (h4): Sub-subsections: 1.1.1, A.1.2, etc.
 Appendix subsections (A.1, B.3, etc.) MUST be ### not ##. Do not promote them.
-NEVER use more than 2 heading levels in a single section. If a section only contains ### subsections with no ## parent on this page, still use ### for them.
-
-TYPOGRAPHY — apply these rules to make the output readable on a small e-ink screen:
-
-BOLD-LEAD PARAGRAPHS: When a paragraph introduces a key concept, system component, finding, or named item,
-bold the opening phrase (up to the first period or em dash) that names it:
-  Before: "Continuous evaluation is performed every cycle to detect drift."
-  After:  "**Continuous evaluation.** Performed every cycle to detect drift."
-Apply this selectively — only when the opening phrase is genuinely a named concept or finding, not for every paragraph.
-
-LISTS: Use lists instead of run-on prose enumerations.
-- Numbered lists (1. 2. 3.) for sequential steps, phases, stages, algorithms, procedures.
-- Bullet lists (- item) for non-sequential features, properties, or items.
-If prose says "first X, then Y, finally Z" — convert to a numbered list.
-If prose says "including X, Y, and Z" with 3+ items of equal weight — convert to bullets.
-
-PARAGRAPH LENGTH: If a paragraph runs longer than 8 lines on the original page, look for a natural
-conceptual break and split it into two paragraphs. Do not split mid-sentence.
-
-TABLES: Limit to 4 columns maximum on the reMarkable 2 (138mm column). If a table has more than 4 columns:
-- Keep the most important columns (usually the first and last)
-- Add a note: "*Table condensed for e-ink display — see original for full column set.*"
-- Never let table cells contain more than ~6 words; truncate or rephrase if needed.
 
 FIGURES — do NOT include figure content or captions inline in "text".
 Instead, place a placeholder exactly like this at the position where the figure appears:
@@ -284,6 +262,37 @@ def _fix_math_spans(text_md: str) -> str:
     return text_md
 
 
+def _truncate_wide_table(md_table: str, max_cols: int = 4) -> str:
+    """Truncate a GFM table to max_cols columns if it is wider.
+
+    The reMarkable 2 text column is 138mm. Tables wider than 4 columns
+    overflow regardless of font size. We keep columns 0..max_cols-1 and
+    append a note row advising the reader to see the original.
+    """
+    lines = [l for l in md_table.splitlines() if l.strip()]
+    if not lines:
+        return md_table
+    # Count columns in the header row (number of | separators - 1)
+    header_cols = lines[0].count('|') - 1
+    if header_cols <= max_cols:
+        return md_table
+
+    result = []
+    for line in lines:
+        if not line.strip().startswith('|'):
+            result.append(line)
+            continue
+        cells = line.split('|')
+        # cells[0] is empty (before leading |), cells[-1] is empty (after trailing |)
+        # Keep cells[1 : max_cols+1], rebuild
+        kept = cells[1 : max_cols + 1]
+        # For separator rows (--- cells), truncate cleanly
+        result.append('| ' + ' | '.join(c.strip() for c in kept) + ' |')
+    result.append(f'\n*Table condensed to {max_cols} columns — '
+                  'see original PDF for full data.*')
+    return '\n'.join(result)
+
+
 def _clean_text(text_md: str) -> str:
     # Remove orphan page numbers (standalone digit lines)
     text_md = re.sub(r'^\s*\d{1,4}\s*$', '', text_md, flags=re.MULTILINE)
@@ -407,12 +416,12 @@ def extract(pdf_path: pathlib.Path, outdir: pathlib.Path,
     text_md = _clean_text(raw)
     (outdir / "text.md").write_text(text_md)
 
-    # Assemble tables.md
+    # Assemble tables.md (truncate wide tables to 4 cols for 138mm RM2 column)
     table_parts = []
     for page in sorted(results, key=lambda p: p["page"]):
         for tbl in page.get("tables", []):
             cap = tbl.get("caption", f"Table (page {page['page']})")
-            md = tbl.get("markdown", "").strip()
+            md = _truncate_wide_table(tbl.get("markdown", "").strip())
             if md:
                 table_parts.append(f"### {cap}\n\n{md}")
     if table_parts:
