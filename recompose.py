@@ -103,11 +103,25 @@ def cmd_build(args: argparse.Namespace) -> pathlib.Path:
         if fig_dir.is_dir():
             shutil.copytree(fig_dir, build_dir / "figures")
 
-        # Patch Makefile: remove --toc if requested
+        # Prepend frontmatter.yaml if pdf_extract wrote one (title, toc-depth, etc.)
+        fm_yaml = src.parent / "frontmatter.yaml"
+        source_md = (build_dir / "source.md").read_text()
+        if fm_yaml.exists() and not source_md.startswith("---"):
+            fm = fm_yaml.read_text().strip()
+            (build_dir / "source.md").write_text(f"---\n{fm}\n---\n\n{source_md}")
+
+        # Patch Makefile: remove --toc if requested; honour toc-depth from frontmatter
+        makefile = (build_dir / "Makefile").read_text()
         if getattr(args, "no_toc", False):
-            makefile = (build_dir / "Makefile").read_text()
             makefile = makefile.replace("--toc \\\n", "").replace("--toc-depth=2 \\\n", "")
-            (build_dir / "Makefile").write_text(makefile)
+        else:
+            # toc-depth in YAML frontmatter overrides Makefile default
+            source_check = (build_dir / "source.md").read_text()
+            import re as _re
+            m = _re.search(r'^toc-depth:\s*(\d)', source_check, _re.MULTILINE)
+            if m:
+                makefile = _re.sub(r'--toc-depth=\d+', f'--toc-depth={m.group(1)}', makefile)
+        (build_dir / "Makefile").write_text(makefile)
 
         # Build
         _run(["make", "source.pdf"], cwd=build_dir)

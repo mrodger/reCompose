@@ -98,22 +98,32 @@ CRITICAL RULES:
 3. Strip: page numbers, running headers (journal name, author name, chapter title repeated at top), and footers.
 4. Preserve: footnotes — append them at the end of the text field as "^[footnote text]" inline markers.
 
+HEADING HIERARCHY — follow strictly:
+- # (h1): Paper title only, and only if this is the title page. Never use # for section headings.
+- ## (h2): Top-level numbered sections: 1 Introduction, 2 Method, A Appendix Title, etc.
+- ### (h3): Subsections: 1.1 Background, A.1 Dataset, B.2 Results, etc.
+- #### (h4): Sub-subsections: 1.1.1, A.1.2, etc.
+Appendix subsections (A.1, B.3, etc.) MUST be ### not ##. Do not promote them.
+
+FIGURES — do NOT include figure content or captions inline in "text".
+Instead, place a placeholder exactly like this at the position where the figure appears:
+  [FIGURE: Figure 1]
+where "Figure 1" matches the label. The caption and description go only in the "figures" list.
+Caption text must be plain prose — no bold, no italic markdown formatting.
+
 Return a JSON object with these keys:
 - "page_type": one of "title", "abstract", "body", "figure", "table", "references", "appendix", "mixed"
-- "text": all prose and math, cleaned. Use markdown:
-    # for chapter titles (thesis) or paper title
-    ## for section headings
-    ### for subsection headings
-    #### for subsubsections
+- "title": the paper title string if this is the title page, else null
+- "text": all prose and math. Figures replaced with [FIGURE: label] placeholders. Use heading hierarchy above.
   Superscript citations as [N] or [AuthorYear]. Inline math as $...$. Display equations as $$...$$.
 - "tables": list of {"caption": "...", "markdown": "<full github-flavoured markdown table>"}. Empty list if none.
   Reproduce ALL cells accurately, including numeric values. Use --- alignment rows.
-- "figures": list of {"label": "Figure 1", "caption": "<full caption text>", "description": "<one-line description of what it shows>"}. Empty list if none.
-- "has_figure_image": true if the page contains a chart, diagram, photograph, or plotted figure that should be cropped."""
+- "figures": list of {"label": "Figure 1", "caption": "<full plain-text caption>", "description": "<one-line description>"}. Empty list if none.
+- "has_figure_image": true if the page contains a chart, diagram, photograph, or plotted figure."""
 
 THESIS_EXTRACT_PROMPT = EXTRACT_PROMPT.replace(
-    "# for chapter titles (thesis) or paper title",
-    "# for chapter titles (e.g. 'Chapter 3: Methodology' → use # heading)",
+    "- # (h1): Paper title only, and only if this is the title page. Never use # for section headings.",
+    "- # (h1): Chapter titles: 'Chapter 3: Methodology' → # Chapter 3: Methodology. Also paper title on title page.",
 )
 
 REFERENCES_PROMPT = """Extract all reference entries from this references/bibliography page.
@@ -316,23 +326,64 @@ def extract(pdf_path: pathlib.Path, outdir: pathlib.Path,
                 except Exception as e:
                     print(f"  fig crop p{n:02d}: {e}")
 
-    # Assemble text.md
+    # Build figure label → page map for placeholder resolution
+    fig_index: dict[str, dict] = {}  # label (lower) → {page, caption, description}
+    for page in results:
+        n = page["page"]
+        for fig in page.get("figures", []):
+            label = fig.get("label", "")
+            fig_index[label.lower()] = {"page": n, "caption": fig.get("caption", ""),
+                                        "description": fig.get("description", "")}
+
+    def _resolve_placeholder(m: re.Match) -> str:
+        """Replace [FIGURE: Figure 1] with image markdown or italicised description."""
+        label = m.group(1).strip()
+        info = fig_index.get(label.lower(), {})
+        n = info.get("page")
+        caption = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', info.get("caption", label))
+        if n:
+            fig_file = figdir / f"fig_p{n:02d}.png"
+            if fig_file.exists():
+                return f"\n\n![{label}](figures/fig_p{n:02d}.png)\n\n*{caption}*\n"
+        return f"\n\n*[{label}: {info.get('description', caption)}]*\n"
+
+    # Assemble text.md — figures come from placeholder substitution only (no duplicate append)
     text_parts = []
     for page in sorted(results, key=lambda p: p["page"]):
-        n = page["page"]
         txt = page.get("text", "").strip()
         if txt:
             text_parts.append(txt)
-        for fig in page.get("figures", []):
-            label = fig.get("label", f"Figure p{n}")
-            caption = fig.get("caption", "")
-            fig_file = figdir / f"fig_p{n:02d}.png"
-            if fig_file.exists():
-                text_parts.append(f"\n![{label}](figures/fig_p{n:02d}.png)\n*{caption}*\n")
-            else:
-                text_parts.append(f"\n*[{label}: {fig.get('description', caption)}]*\n")
 
-    text_md = _clean_text("\n\n".join(text_parts))
+    raw = "\n\n".join(text_parts)
+    # Resolve [FIGURE: ...] placeholders
+    raw = re.sub(r'\[FIGURE:\s*([^\]]+)\]', _resolve_placeholder, raw)
+
+    # Extract paper title from page 1 for YAML frontmatter
+    paper_title: str | None = None
+    for page in results:
+        if page.get("page") == 1:
+            paper_title = page.get("title") or None
+            break
+    if not paper_title:
+        # Fallback: grab first # heading from text
+        m = re.search(r'^#\s+(.+)$', raw, re.MULTILINE)
+        if m:
+            paper_title = m.group(1).strip()
+    # Strip # headings from body (title goes to YAML frontmatter)
+    raw = re.sub(r'^#\s+.+\n?', '', raw, flags=re.MULTILINE)
+
+    # Detect TOC depth: if >12 ## sections (papers with large appendices), use depth 1
+    h2_count = len(re.findall(r'^##\s', raw, re.MULTILINE))
+    toc_depth = 1 if h2_count > 12 else 2
+
+    # Write frontmatter.yaml for recompose build to pick up
+    frontmatter_lines = []
+    if paper_title:
+        frontmatter_lines.append(f'title: "{paper_title}"')
+    frontmatter_lines.append(f'toc-depth: {toc_depth}')
+    (outdir / "frontmatter.yaml").write_text("\n".join(frontmatter_lines) + "\n")
+
+    text_md = _clean_text(raw)
     (outdir / "text.md").write_text(text_md)
 
     # Assemble tables.md
