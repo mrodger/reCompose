@@ -87,7 +87,7 @@ def _gemini(api_key: str, image_path: pathlib.Path, prompt: str) -> dict:
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
-EXTRACT_PROMPT = """You are extracting content from one page of an academic PDF for reformatting as a clean Markdown document.
+EXTRACT_PROMPT = """You are extracting content from one page of an academic PDF for reformatting as a clean e-ink document optimised for the reMarkable 2 tablet (138mm text column, grayscale).
 
 CRITICAL RULES:
 1. All mathematical expressions MUST be returned as LaTeX:
@@ -100,10 +100,33 @@ CRITICAL RULES:
 
 HEADING HIERARCHY — follow strictly:
 - # (h1): Paper title only, and only if this is the title page. Never use # for section headings.
-- ## (h2): Top-level numbered sections: 1 Introduction, 2 Method, A Appendix Title, etc.
-- ### (h3): Subsections: 1.1 Background, A.1 Dataset, B.2 Results, etc.
+- ## (h2): Top-level numbered sections. PRESERVE the section number: "2 Introduction" → ## 2 Introduction
+- ### (h3): Subsections. PRESERVE the number: "2.1 Background" → ### 2.1 Background
 - #### (h4): Sub-subsections: 1.1.1, A.1.2, etc.
 Appendix subsections (A.1, B.3, etc.) MUST be ### not ##. Do not promote them.
+NEVER use more than 2 heading levels in a single section. If a section only contains ### subsections with no ## parent on this page, still use ### for them.
+
+TYPOGRAPHY — apply these rules to make the output readable on a small e-ink screen:
+
+BOLD-LEAD PARAGRAPHS: When a paragraph introduces a key concept, system component, finding, or named item,
+bold the opening phrase (up to the first period or em dash) that names it:
+  Before: "Continuous evaluation is performed every cycle to detect drift."
+  After:  "**Continuous evaluation.** Performed every cycle to detect drift."
+Apply this selectively — only when the opening phrase is genuinely a named concept or finding, not for every paragraph.
+
+LISTS: Use lists instead of run-on prose enumerations.
+- Numbered lists (1. 2. 3.) for sequential steps, phases, stages, algorithms, procedures.
+- Bullet lists (- item) for non-sequential features, properties, or items.
+If prose says "first X, then Y, finally Z" — convert to a numbered list.
+If prose says "including X, Y, and Z" with 3+ items of equal weight — convert to bullets.
+
+PARAGRAPH LENGTH: If a paragraph runs longer than 8 lines on the original page, look for a natural
+conceptual break and split it into two paragraphs. Do not split mid-sentence.
+
+TABLES: Limit to 4 columns maximum on the reMarkable 2 (138mm column). If a table has more than 4 columns:
+- Keep the most important columns (usually the first and last)
+- Add a note: "*Table condensed for e-ink display — see original for full column set.*"
+- Never let table cells contain more than ~6 words; truncate or rephrase if needed.
 
 FIGURES — do NOT include figure content or captions inline in "text".
 Instead, place a placeholder exactly like this at the position where the figure appears:
@@ -262,8 +285,6 @@ def _fix_math_spans(text_md: str) -> str:
 
 
 def _clean_text(text_md: str) -> str:
-    # Strip inline section numbers from headings: ## 1 Introduction → ## Introduction
-    text_md = re.sub(r'^(#{1,4})\s+\d+(\.\d+)*\.?\s+', r'\1 ', text_md, flags=re.MULTILINE)
     # Remove orphan page numbers (standalone digit lines)
     text_md = re.sub(r'^\s*\d{1,4}\s*$', '', text_md, flags=re.MULTILINE)
     # Fix math delimiter issues before pandoc sees the markdown

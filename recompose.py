@@ -20,6 +20,7 @@ Usage:
 import argparse
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -117,10 +118,9 @@ def cmd_build(args: argparse.Namespace) -> pathlib.Path:
         else:
             # toc-depth in YAML frontmatter overrides Makefile default
             source_check = (build_dir / "source.md").read_text()
-            import re as _re
-            m = _re.search(r'^toc-depth:\s*(\d)', source_check, _re.MULTILINE)
+            m = re.search(r'^toc-depth:\s*(\d)', source_check, re.MULTILINE)
             if m:
-                makefile = _re.sub(r'--toc-depth=\d+', f'--toc-depth={m.group(1)}', makefile)
+                makefile = re.sub(r'--toc-depth=\d+', f'--toc-depth={m.group(1)}', makefile)
         (build_dir / "Makefile").write_text(makefile)
 
         # Build
