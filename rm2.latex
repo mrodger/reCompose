@@ -1,5 +1,5 @@
 % rm2.latex — Pandoc template for reMarkable 2 (1404×1872, 226DPI e-ink)
-% Geometry: 157.8mm × 210.4mm, 10mm margins
+% Geometry: 157.8mm × 210.4mm, 4mm margins
 % Fonts: Linux Libertine ecosystem (optimized for e-ink legibility)
 
 \documentclass[
@@ -48,8 +48,8 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage[font={small},labelfont={bf,sf},labelsep=period,skip=4pt]{caption}
-\usepackage{booktabs,array}
-\usepackage{xltabular}              % xltabular = longtable+tabularx hybrid (native page-breaking X columns)
+\usepackage{ltablex,booktabs,array} % ltablex = longtable + tabularx (X columns with page breaking)
+\usepackage{xltabular}              % longtable+tabularx hybrid -- used by fix_tables.py output
 \usepackage{ragged2e}               % intelligent ragged-right with hyphenation
 \usepackage{calc}                   % required by pandoc's \real{} column width macros
 \usepackage{xcolor}
@@ -90,7 +90,8 @@ $endif$
 \widowpenalties 1 10000
 \clubpenalties  1 10000
 
-% ── Section numbering — off by default; set numbersections: true in YAML ──
+% ── Section numbering — off by default for extracted academic PDFs ──
+% Set numbersections: true in YAML frontmatter to enable (e.g. technical reports)
 $if(numbersections)$
 \setcounter{secnumdepth}{$if(secnumdepth)$$secnumdepth$$else$3$endif$}
 $else$
@@ -128,14 +129,13 @@ $endif$
 % ── Tables — clean, e-ink friendly ──────────────────────────────
 \usepackage{array}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
-\renewcommand{\arraystretch}{1.6}
+\renewcommand{\arraystretch}{1.3}
 % Thinner rules for e-ink
 \setlength{\heavyrulewidth}{0.8pt}
 \setlength{\lightrulewidth}{0.4pt}
 \setlength{\cmidrulewidth}{0.4pt}
 % Dense table mitigation: small body + suppress hyphenation in narrow cells
 \AtBeginEnvironment{tabularx}{\small\hyphenpenalty=1000\exhyphenpenalty=1000}
-\AtBeginEnvironment{xltabular}{\small\hyphenpenalty=1000\exhyphenpenalty=1000}
 \AtBeginEnvironment{longtable}{\small\hyphenpenalty=1000\exhyphenpenalty=1000}
 
 % ── Code blocks — no syntax colouring (grayscale only) ──────────

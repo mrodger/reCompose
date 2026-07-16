@@ -6,12 +6,11 @@
 #   make report.pdf          # build specific file
 #   make clean               # remove all built PDFs and intermediate .tex
 #   make rebuild             # clean + build all
-#   make upload              # upload PDFs via rclone (set GDRIVE_DEST below)
 
 PANDOC       := pandoc
 TEMPLATE     := rm2.latex
 PDF_ENGINE   := xelatex
-GDRIVE_DEST  := gdrive:RM-Formatted/   # adjust to your rclone remote
+GDRIVE_DEST  := gdrive:RM-Formatted/
 PANDOC_FLAGS := --pdf-engine=$(PDF_ENGINE) \
                 --template=$(TEMPLATE) \
                 --from=markdown+smart \
