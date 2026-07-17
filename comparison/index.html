@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>reCompose — Build Comparison Viewer</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --panel: #252525;
+    --border: #383838;
+    --text: #e0e0e0;
+    --muted: #888;
+    --accent: #5b9fd6;
+    --green: #4ade80;
+    --green-bg: #1a3a1a;
+    --yellow: #fbbf24;
+    --yellow-bg: #3a3a1a;
+    --red: #f87171;
+    --red-bg: #3a1a1a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 20px;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    max-width: 1600px;
+    margin: 0 auto 24px;
+  }
+  .header h1 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .header .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-bottom: 16px;
+  }
+  .summary-bar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .summary-chip {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 0.85rem;
+  }
+  .summary-chip strong { color: #fff; }
+  .summary-chip .label { color: var(--muted); margin-right: 6px; }
+
+  /* Controls */
+  .controls {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    padding: 12px 0;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: #333; border-color: #555; }
+  .btn.active {
+    background: var(--green-bg);
+    border-color: var(--green);
+    color: var(--green);
+  }
+
+  /* Comparison grid */
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) {
+    .comparison-grid { grid-template-columns: 1fr; }
+  }
+
+  .build-col {
+    background: var(--panel);
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .build-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .build-header h2 { font-size: 1.1rem; color: #fff; margin-bottom: 6px; }
+  .build-header .meta { color: var(--muted); font-size: 0.8rem; line-height: 1.6; }
+  .build-header .score-badge {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 8px;
+  }
+  .score-high { background: var(--green-bg); color: var(--green); }
+  .score-mid  { background: var(--yellow-bg); color: var(--yellow); }
+  .score-low  { background: var(--red-bg); color: var(--red); }
+
+  /* Pages */
+  .pages-container {
+    max-height: 75vh;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scroll-behavior: smooth;
+  }
+  .pages-container::-webkit-scrollbar { width: 6px; }
+  .pages-container::-webkit-scrollbar-track { background: var(--bg); }
+  .pages-container::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+  .page-wrapper { position: relative; }
+  .page-label {
+    color: #666;
+    font-size: 0.75rem;
+    margin-bottom: 6px;
+    font-family: monospace;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .page-score {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-family: sans-serif;
+  }
+  .page-wrapper img {
+    width: 100%;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    display: block;
+  }
+
+  /* Footer */
+  .footer {
+    max-width: 1600px;
+    margin: 32px auto 0;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.6;
+  }
+  .footer a { color: var(--accent); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>reCompose Pipeline Tuning — Build Comparison</h1>
+  <p class="subtitle">SenseNova-Skills overview rendered through the reCompose pipeline. Both builds reviewed by Gemini 2.5 Flash at native RM2 resolution (226 DPI / 1405×1873 px).</p>
+  <div class="summary-bar">
+    <div class="summary-chip"><span class="label">Model:</span><strong>Gemini 2.5 Flash</strong> (via OpenRouter)</div>
+    <div class="summary-chip"><span class="label">Render:</span><strong>226 DPI</strong> (native RM2)</div>
+    <div class="summary-chip"><span class="label">Canvas:</span><strong>157.8 × 210.4 mm</strong></div>
+    <div class="summary-chip"><span class="label">Device:</span><strong>1872 × 1404 px, 263 PPI</strong></div>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="btn" id="syncBtn" onclick="toggleSync()">🔗 Sync Scroll</button>
+  <button class="btn" onclick="scrollTop()">⬆ Top</button>
+  <span style="color:var(--muted);font-size:0.8rem;">Click Sync Scroll to align both columns</span>
+</div>
+
+<div class="comparison-grid">
+
+  <!-- BUILD 1 -->
+  <div class="build-col">
+    <div class="build-header">
+      <h2>Build 1 — Full (with images)</h2>
+      <div class="meta">
+        10 pages · 17.0 MB · 2,716 words · 2 figures · 5 tables<br>
+        Complete content — all 9 sections, 9-role agent table, full search connectors, 4 examples<br>
+        <strong>Canonical version</strong>
+      </div>
+      <div class="score-badge score-high">Vision: 8.9/10 (226 DPI)</div>
+    </div>
+    <div class="pages-container" id="scroll1">
+      <div class="page-wrapper">
+        <div class="page-label">Page 1 <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-01.png" alt="Build 1 Page 1 — Title + TOC">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 2 <span class="page-score score-mid">8/10</span></div>
+        <img src="build1-native/page-02.png" alt="Build 1 Page 2 — Family table">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 3 — Figure: Tier Diagram <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-03.png" alt="Build 1 Page 3 — Figure 1">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 4 — Figure: Infographic Samples <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-04.png" alt="Build 1 Page 4 — Figure 2">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 5 <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-05.png" alt="Build 1 Page 5">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 6 <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-06.png" alt="Build 1 Page 6">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 7 — Role-Agent Table <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-07.png" alt="Build 1 Page 7 — Role table">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 8 — Search Connectors Table <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-08.png" alt="Build 1 Page 8 — Search table">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 9 <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-09.png" alt="Build 1 Page 9">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 10 <span class="page-score score-high">9/10</span></div>
+        <img src="build1-native/page-10.png" alt="Build 1 Page 10 — Takeaways">
+      </div>
+    </div>
+  </div>
+
+  <!-- BUILD 2 -->
+  <div class="build-col">
+    <div class="build-header">
+      <h2>Build 2 — Text-only (fresh)</h2>
+      <div class="meta">
+        7 pages · 47 KB · 1,785 words · 0 figures · 2 tables<br>
+        Truncated — ~35% less content. Missing: role table, 5 of 9 search skills, 2 of 4 examples<br>
+        Auto-TOC from generic Pandoc YAML
+      </div>
+      <div class="score-badge score-high">Vision: 9.1/10 (226 DPI)</div>
+    </div>
+    <div class="pages-container" id="scroll2">
+      <div class="page-wrapper">
+        <div class="page-label">Page 1 <span class="page-score score-high">9/10</span></div>
+        <img src="build2-native/page-1.png" alt="Build 2 Page 1">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 2 <span class="page-score score-high">9/10</span></div>
+        <img src="build2-native/page-2.png" alt="Build 2 Page 2">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 3 <span class="page-score score-high">9.5/10</span></div>
+        <img src="build2-native/page-3.png" alt="Build 2 Page 3">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 4 <span class="page-score score-high">9/10</span></div>
+        <img src="build2-native/page-4.png" alt="Build 2 Page 4">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 5 <span class="page-score score-high">9/10</span></div>
+        <img src="build2-native/page-5.png" alt="Build 2 Page 5">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 6 <span class="page-score score-high">9/10</span></div>
+        <img src="build2-native/page-6.png" alt="Build 2 Page 6">
+      </div>
+      <div class="page-wrapper">
+        <div class="page-label">Page 7 <span class="page-score score-high">9/10</span></div>
+        <img src="build2-native/page-7.png" alt="Build 2 Page 7">
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <p><strong>reCompose</strong> — <a href="https://github.com/mrodger/reCompose">github.com/mrodger/reCompose</a> · MIT License</p>
+  <p>Both PDFs built via: Pandoc + rm2.latex → fix_tables.py (longtable→xltabular) → XeLaTeX. Pages rendered at 226 DPI via pdftoppm. Vision review by Gemini 2.5 Flash via OpenRouter with corrected device-spec prompt (1872×1404 px, 263 PPI, grayscale, anti-assumption clause).</p>
+  <p>Build 1 is the canonical version — complete content, figures score 9/10 at native resolution. The 0.2-point average difference is noise from page-count asymmetry (7 vs 10), not quality difference.</p>
+</div>
+
+<script>
+  let synced = false;
+  const s1 = document.getElementById('scroll1');
+  const s2 = document.getElementById('scroll2');
+
+  function toggleSync() {
+    synced = !synced;
+    document.getElementById('syncBtn').classList.toggle('active', synced);
+    if (synced) {
+      // Align to same fractional position
+      syncScroll(s1, s2);
+    }
+  }
+
+  function syncScroll(source, target) {
+    const sourceMax = source.scrollHeight - source.clientHeight;
+    const targetMax = target.scrollHeight - target.clientHeight;
+    if (sourceMax === 0) return;
+    const ratio = source.scrollTop / sourceMax;
+    target.scrollTop = ratio * targetMax;
+  }
+
+  let scrolling = false;
+  s1.addEventListener('scroll', () => {
+    if (!synced || scrolling) return;
+    scrolling = true;
+    syncScroll(s1, s2);
+    requestAnimationFrame(() => scrolling = false);
+  });
+  s2.addEventListener('scroll', () => {
+    if (!synced || scrolling) return;
+    scrolling = true;
+    syncScroll(s2, s1);
+    requestAnimationFrame(() => scrolling = false);
+  });
+
+  function scrollTop() {
+    s1.scrollTo({ top: 0, behavior: 'smooth' });
+    s2.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+</script>
+
+</body>
+</html>

@@ -89,6 +89,8 @@ def _gemini(api_key: str, image_path: pathlib.Path, prompt: str) -> dict:
 
 EXTRACT_PROMPT = """You are transcribing one page of an academic PDF into structured JSON. Your job is faithful, accurate extraction — do NOT rewrite, reformat, or editorialize. Reproduce content exactly as it appears.
 
+DEVICE CONTEXT: The page images you receive are rendered at 226 DPI — the native resolution of the reMarkable 2 e-ink tablet (1872 × 1404 px, 263 PPI). This is a HIGH-RESOLUTION display. Images, figures, and diagrams that appear sharp in these renders WILL appear equally sharp on the actual device. Do NOT penalize or downgrade figure/image content based on e-ink resolution assumptions.
+
 CRITICAL RULES:
 1. All mathematical expressions MUST be returned as LaTeX:
    - Inline math: $x = y + z$ (single dollar signs)
@@ -306,7 +308,7 @@ def _clean_text(text_md: str) -> str:
 # ── Main extraction ───────────────────────────────────────────────────────────
 
 def extract(pdf_path: pathlib.Path, outdir: pathlib.Path,
-            api_key: str, render_dpi: int = 200, thesis: bool = False) -> None:
+            api_key: str, render_dpi: int = 226, thesis: bool = False) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     figdir = outdir / "figures"
     figdir.mkdir(exist_ok=True)
@@ -447,7 +449,7 @@ def main() -> None:
     ap.add_argument("--out", type=pathlib.Path, default=None,
                     help="Output directory (default: <pdf-stem>_extracted/)")
     ap.add_argument("--key", default=None, help="OpenRouter API key")
-    ap.add_argument("--dpi", type=int, default=200, help="Render DPI (default 200)")
+    ap.add_argument("--dpi", type=int, default=226, help="Render DPI (default 226 — RM2 native)")
     ap.add_argument("--thesis", action="store_true",
                     help="Thesis mode: chapter-aware heading hierarchy")
     args = ap.parse_args()
